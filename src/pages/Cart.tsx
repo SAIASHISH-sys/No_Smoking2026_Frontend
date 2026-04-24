@@ -2,23 +2,60 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Trash2, ArrowRight, ShoppingCart, CheckCircle, Truck } from 'lucide-react';
 import { useCart } from '../context/CartContext';
+import { useAuth } from '../context/AuthContext';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
-import { useState } from 'react';
+import { useMutation } from '@apollo/client/react';
+import { CHECKOUT_CART, VERIFY_CART_PAYMENT } from '../graphql/mutations';
+import { useRazorpay } from '../hooks/useRazorpay';
 
 export default function Cart() {
   const { items, removeFromCart, updateQuantity, clearCart, getTotalPrice, getTotalItems } = useCart();
+  const { user } = useAuth();
   const navigate = useNavigate();
-  const [isCheckingOut, setIsCheckingOut] = useState(false);
+  const { initiatePayment, loading: isCheckingOut, error: checkoutError, clearError } = useRazorpay();
 
-  const handleCheckout = () => {
-    setIsCheckingOut(true);
-    setTimeout(() => {
-      alert('Order placed successfully! (Demo)');
-      clearCart();
-      setIsCheckingOut(false);
-      navigate('/');
-    }, 2000);
+  const [checkoutCart] = useMutation<{
+    checkoutCart: { razorpayOrderId: string; purchaseIds: number[]; totalAmount: number };
+  }>(CHECKOUT_CART);
+
+  const [verifyCartPayment] = useMutation<{ verifyCartPayment: boolean }>(VERIFY_CART_PAYMENT);
+
+  const handleCheckout = async () => {
+    if (!user) { navigate('/login'); return; }
+    clearError();
+
+    const cartItems = items.map((item) => ({
+      merchId: parseInt(item.id.split('-')[0], 10),
+      qty: item.quantity,
+      size: item.size,
+    }));
+
+    const { data } = await checkoutCart({ variables: { items: cartItems } });
+    if (!data?.checkoutCart) return;
+
+    const { razorpayOrderId, purchaseIds, totalAmount } = data.checkoutCart;
+
+    await initiatePayment({
+      orderId: razorpayOrderId,
+      amount: Math.round(totalAmount * 1.18),
+      description: `Cart checkout (${items.length} item${items.length > 1 ? 's' : ''})`,
+      prefill: { name: user.name, email: user.email, contact: user.mobileNo ?? '' },
+      onSuccess: async (response) => {
+        const { data: verifyData } = await verifyCartPayment({
+          variables: {
+            purchaseIds,
+            razorpayOrderId: response.razorpay_order_id,
+            razorpayPaymentId: response.razorpay_payment_id,
+            razorpaySignature: response.razorpay_signature,
+          },
+        });
+        if (verifyData?.verifyCartPayment) {
+          clearCart();
+          navigate('/');
+        }
+      },
+    });
   };
 
   return (
@@ -184,6 +221,13 @@ export default function Cart() {
                       ₹{Math.round(getTotalPrice() * 1.18)}
                     </p>
                   </div>
+
+                  {/* Error */}
+                  {checkoutError && (
+                    <p className="mb-4 text-sm text-red-600 bg-red-50 rounded-lg p-3">
+                      {checkoutError}
+                    </p>
+                  )}
 
                   {/* Checkout Button */}
                   <motion.button

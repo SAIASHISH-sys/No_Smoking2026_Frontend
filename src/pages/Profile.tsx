@@ -1,9 +1,12 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Mail, Phone, Calendar, User, LogOut, MapPin, CheckCircle, Clock, AlertCircle, Package, ArrowLeft } from 'lucide-react';
-import { useQuery } from '@apollo/client/react';
+import { Mail, Phone, Calendar, User, LogOut, MapPin, CheckCircle, Clock, AlertCircle, Package, ArrowLeft, CreditCard } from 'lucide-react';
+import { useQuery, useMutation } from '@apollo/client/react';
 import { useAuth } from '../context/AuthContext';
 import { GET_USER_PURCHASES } from '../graphql/queries';
+import { CREATE_MERCH_PURCHASE_ORDER, VERIFY_MERCH_PAYMENT } from '../graphql/mutations';
+import { useRazorpay } from '../hooks/useRazorpay';
 
 interface Purchase {
   id: number;
@@ -11,6 +14,7 @@ interface Purchase {
   size: string;
   status: 'PENDING' | 'COMPLETED' | 'FAILED';
   createdAt: string;
+  razorpayOrderId: string | null;
   razorpayPaymentId: string | null;
   merch: { id: number; name: string; price: number };
 }
@@ -19,10 +23,14 @@ export default function Profile() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
-  const { data, loading: purchasesLoading } = useQuery<{ getUserPurchases: Purchase[] }>(
+  const { data, loading: purchasesLoading, refetch } = useQuery<{ getUserPurchases: Purchase[] }>(
     GET_USER_PURCHASES,
     { skip: !user }
   );
+
+  const [createMerchPurchaseOrder] = useMutation<{ createMerchPurchaseOrder: string }>(CREATE_MERCH_PURCHASE_ORDER);
+  const [verifyMerchPayment] = useMutation(VERIFY_MERCH_PAYMENT);
+  const { initiatePayment, loading: payingId, error: paymentError } = useRazorpay();
 
   if (!user) {
     navigate('/login');
@@ -52,6 +60,41 @@ export default function Profile() {
     if (status === 'COMPLETED') return 'text-green-700';
     if (status === 'FAILED') return 'text-red-700';
     return 'text-yellow-700';
+  };
+
+  const [retryingId, setRetryingId] = useState<number | null>(null);
+
+  const handleRetryPayment = async (purchase: Purchase) => {
+    if (!user) return;
+    setRetryingId(purchase.id);
+
+    try {
+      const amount = purchase.merch.price * purchase.qty;
+
+      const { data: orderData } = await createMerchPurchaseOrder({
+        variables: { purchaseId: purchase.id, amount },
+      });
+      if (!orderData?.createMerchPurchaseOrder) return;
+
+      await initiatePayment({
+        orderId: orderData.createMerchPurchaseOrder,
+        amount: Math.round(amount * 1.18),
+        description: `${purchase.merch.name} × ${purchase.qty} (${purchase.size})`,
+        prefill: { name: user.name, email: user.email, contact: user.mobileNo ?? '' },
+        onSuccess: async (response) => {
+          await verifyMerchPayment({
+            variables: {
+              purchaseId: purchase.id,
+              razorpayPaymentId: response.razorpay_payment_id,
+              razorpaySignature: response.razorpay_signature,
+            },
+          });
+          await refetch();
+        },
+      });
+    } finally {
+      setRetryingId(null);
+    }
   };
 
   const totalSpent = purchases
@@ -168,6 +211,9 @@ export default function Profile() {
           </div>
 
           <div className="p-6 sm:p-8">
+            {paymentError && (
+              <p className="mb-4 text-sm text-red-600 bg-red-50 rounded-lg p-3">{paymentError}</p>
+            )}
             {purchasesLoading ? (
               <div className="flex justify-center py-10">
                 <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
@@ -208,6 +254,16 @@ export default function Profile() {
                       <span className={`text-xs sm:text-sm font-bold uppercase tracking-wider px-2.5 sm:px-3 py-1 rounded-full ${statusText(purchase.status)}`}>
                         {purchase.status}
                       </span>
+                      {purchase.status === 'PENDING' && (
+                        <button
+                          onClick={() => handleRetryPayment(purchase)}
+                          disabled={retryingId === purchase.id || !!payingId}
+                          className="flex items-center gap-1.5 bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-colors"
+                        >
+                          <CreditCard size={13} />
+                          {retryingId === purchase.id ? 'Opening...' : 'Pay Now'}
+                        </button>
+                      )}
                     </div>
                   </motion.div>
                 ))}

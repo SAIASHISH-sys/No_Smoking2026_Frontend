@@ -48,7 +48,7 @@ export default function HeroSection() {
           </p>
           <div className="mt-6 sm:mt-10 flex flex-col md:flex-row flex-wrap gap-3 sm:gap-4">
             <a 
-              href="register"
+              href="/profile"
              className="bg-orange-600 text-white px-6 sm:px-8 py-3 sm:py-4 rounded-full font-bold shadow-lg shadow-orange-200 hover:bg-orange-700 transition-all flex items-center justify-center md:justify-start gap-2 group text-sm sm:text-base w-full md:w-auto">
               Join the Movement{' '}
               <ArrowRight

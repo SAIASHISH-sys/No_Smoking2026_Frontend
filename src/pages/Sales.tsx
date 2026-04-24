@@ -56,7 +56,7 @@ export default function Sales() {
     <div className="min-h-screen bg-gradient-to-br from-[#FFFBF7] to-orange-50">
       <Navbar />
 
-      <div className="pt-20 pb-12 sm:pb-16 md:pb-20 px-4 sm:px-6">
+      <div className="pt-24 pb-12 sm:pb-16 md:pb-20 px-4 sm:px-6">
         <div className="max-w-6xl mx-auto">
           {/* Breadcrumb */}
           <motion.div

@@ -140,6 +140,38 @@ export const VERIFY_MERCH_PAYMENT = gql`
 `;
 
 /**
+ * Mutation: Checkout entire cart — creates purchases + single Razorpay order
+ */
+export const CHECKOUT_CART = gql`
+  mutation CheckoutCart($items: [CartOrderItemInput!]!) {
+    checkoutCart(items: $items) {
+      razorpayOrderId
+      purchaseIds
+      totalAmount
+    }
+  }
+`;
+
+/**
+ * Mutation: Verify cart payment and mark all purchases completed
+ */
+export const VERIFY_CART_PAYMENT = gql`
+  mutation VerifyCartPayment(
+    $purchaseIds: [Float!]!
+    $razorpayOrderId: String!
+    $razorpayPaymentId: String!
+    $razorpaySignature: String!
+  ) {
+    verifyCartPayment(
+      purchaseIds: $purchaseIds
+      razorpayOrderId: $razorpayOrderId
+      razorpayPaymentId: $razorpayPaymentId
+      razorpaySignature: $razorpaySignature
+    )
+  }
+`;
+
+/**
  * Mutation: Create Razorpay order for registration
  */
 export const CREATE_REGISTRATION_ORDER = gql`

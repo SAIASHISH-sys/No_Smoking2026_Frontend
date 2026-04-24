@@ -4,8 +4,9 @@ import { motion } from 'framer-motion';
 import { Mail, Lock, Phone, Calendar, User, ArrowRight, CheckCircle } from 'lucide-react';
 import { useMutation } from '@apollo/client/react';
 import { useAuth } from '../context/AuthContext';
-import { SEND_VERIFICATION_OTP, VERIFY_OTP, SIGN_UP_USER } from '../graphql/mutations';
+import { SEND_VERIFICATION_OTP, VERIFY_OTP, SIGN_UP_USER, CREATE_REGISTRATION_ORDER, VERIFY_REGISTRATION_PAYMENT } from '../graphql/mutations';
 import { storeAuthData } from '../utils/authUtils';
+import { useRazorpay } from '../hooks/useRazorpay';
 
 export default function Signup() {
   const [step, setStep] = useState<'email' | 'otp' | 'details'>('email');
@@ -28,6 +29,9 @@ export default function Signup() {
   const [signUpMutation, { loading: signupLoading }] = useMutation<{
     signUpUser: { token: string; role: string; user: { id: number; email: string; name: string; age: number; mobileNo: string; role: string; campaignId: string } }
   }>(SIGN_UP_USER);
+  const [createRegistrationOrder] = useMutation<{ createRegistrationOrder: string }>(CREATE_REGISTRATION_ORDER);
+  const [verifyRegistrationPayment] = useMutation(VERIFY_REGISTRATION_PAYMENT);
+  const { initiatePayment, loading: paymentLoading, error: paymentError } = useRazorpay();
 
   const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -69,34 +73,43 @@ export default function Signup() {
     setError('');
 
     try {
-      if (password !== confirmPassword) {
-        throw new Error('Passwords do not match');
-      }
-
-      if (password.length < 6) {
-        throw new Error('Password must be at least 6 characters');
-      }
+      if (password !== confirmPassword) throw new Error('Passwords do not match');
+      if (password.length < 6) throw new Error('Password must be at least 6 characters');
 
       const { data } = await signUpMutation({
         variables: {
-          data: {
-            email,
-            name,
-            mobileNo,
-            age: parseInt(age),
-            password,
-          },
+          data: { email, name, mobileNo, age: parseInt(age), password },
           verificationToken,
         },
       });
 
       if (data?.signUpUser?.token) {
-        // Store auth data in localStorage
         const { token, role, user } = data.signUpUser;
         storeAuthData(token, role, user.email, user.id, user.name);
-
-        // Update Auth context
         await signup({ token, user, role });
+
+        // Admin skips registration payment
+        if (role !== 'ADMIN') {
+          const { data: orderData } = await createRegistrationOrder({ variables: { amount: 500 } });
+          if (orderData?.createRegistrationOrder) {
+            await initiatePayment({
+              orderId: orderData.createRegistrationOrder,
+              amount: 500,
+              description: 'No Smoking Campaign — Registration Fee',
+              prefill: { name: user.name, email: user.email, contact: mobileNo },
+              onSuccess: async (response) => {
+                await verifyRegistrationPayment({
+                  variables: {
+                    razorpayOrderId: response.razorpay_order_id,
+                    razorpayPaymentId: response.razorpay_payment_id,
+                    razorpaySignature: response.razorpay_signature,
+                  },
+                });
+              },
+            });
+          }
+        }
+
         navigate(role === 'ADMIN' ? '/admin' : '/profile');
       }
     } catch (err) {
@@ -144,13 +157,13 @@ export default function Signup() {
             onSubmit={step === 'email' ? handleSendOtp : step === 'otp' ? handleVerifyOtp : handleSignup}
             className="p-6 sm:p-8"
           >
-            {error && (
+            {(error || paymentError) && (
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 className="mb-4 p-3 sm:p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm"
               >
-                {error}
+                {error || paymentError}
               </motion.div>
             )}
 
@@ -332,11 +345,11 @@ export default function Signup() {
 
                 <button
                   type="submit"
-                  disabled={signupLoading || !name || !mobileNo || !dob || !password || !confirmPassword}
+                  disabled={signupLoading || paymentLoading || !name || !mobileNo || !dob || !password || !confirmPassword}
                   className="w-full bg-gradient-to-r from-orange-600 to-orange-700 text-white py-3 sm:py-4 rounded-lg sm:rounded-xl font-bold hover:from-orange-700 hover:to-orange-800 transition-all flex items-center justify-center gap-2 group disabled:opacity-50 disabled:cursor-not-allowed text-sm sm:text-base"
                 >
-                  {signupLoading ? 'Creating Account...' : 'Create Account'}
-                  {!signupLoading && <CheckCircle size={18} />}
+                  {signupLoading ? 'Creating Account...' : paymentLoading ? 'Opening Payment...' : 'Create Account & Pay ₹500'}
+                  {!signupLoading && !paymentLoading && <CheckCircle size={18} />}
                 </button>
 
                 <button
