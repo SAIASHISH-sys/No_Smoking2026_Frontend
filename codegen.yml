@@ -1,0 +1,11 @@
+schema: "http://localhost:4002/graphql"
+# Look for .graphql files OR gql tags inside .ts/.tsx files
+documents: 
+  - "./src/**.graphql"
+  - "./src/**/*.{ts,tsx}"
+generates:
+  src/generated/graphql.tsx:
+    plugins:
+      - "typescript"
+      - "typescript-operations"
+      - "typescript-react-apollo"
