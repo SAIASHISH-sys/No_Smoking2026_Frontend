@@ -1,12 +1,13 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Trash2, ArrowRight, ShoppingCart, CheckCircle, Truck } from 'lucide-react';
+import { Trash2, ArrowRight, ShoppingCart, CheckCircle, Truck, Clock } from 'lucide-react';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import { useMutation } from '@apollo/client/react';
-import { CHECKOUT_CART, VERIFY_CART_PAYMENT } from '../graphql/mutations';
+import { CHECKOUT_CART, VERIFY_CART_PAYMENT, PAY_LATER_CART } from '../graphql/mutations';
 import { useRazorpay } from '../hooks/useRazorpay';
 
 export default function Cart() {
@@ -14,12 +15,37 @@ export default function Cart() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const { initiatePayment, loading: isCheckingOut, error: checkoutError, clearError } = useRazorpay();
+  const [isPayingLater, setIsPayingLater] = useState(false);
+  const [payLaterError, setPayLaterError] = useState<string | null>(null);
 
   const [checkoutCart] = useMutation<{
     checkoutCart: { razorpayOrderId: string; purchaseIds: number[]; totalAmount: number };
   }>(CHECKOUT_CART);
 
   const [verifyCartPayment] = useMutation<{ verifyCartPayment: boolean }>(VERIFY_CART_PAYMENT);
+  const [payLaterCart] = useMutation<{ payLaterCart: number[] }>(PAY_LATER_CART);
+
+  const handlePayLater = async () => {
+    if (!user) { navigate('/login'); return; }
+    setPayLaterError(null);
+    setIsPayingLater(true);
+    try {
+      const cartItems = items.map((item) => ({
+        merchId: parseInt(item.id.split('-')[0], 10),
+        qty: item.quantity,
+        size: item.size,
+      }));
+      const { data } = await payLaterCart({ variables: { items: cartItems } });
+      if (data?.payLaterCart) {
+        clearCart();
+        navigate('/profile');
+      }
+    } catch (err: unknown) {
+      setPayLaterError(err instanceof Error ? err.message : 'Pay later failed');
+    } finally {
+      setIsPayingLater(false);
+    }
+  };
 
   const handleCheckout = async () => {
     if (!user) { navigate('/login'); return; }
@@ -222,10 +248,15 @@ export default function Cart() {
                     </p>
                   </div>
 
-                  {/* Error */}
+                  {/* Errors */}
                   {checkoutError && (
                     <p className="mb-4 text-sm text-red-600 bg-red-50 rounded-lg p-3">
                       {checkoutError}
+                    </p>
+                  )}
+                  {payLaterError && (
+                    <p className="mb-4 text-sm text-red-600 bg-red-50 rounded-lg p-3">
+                      {payLaterError}
                     </p>
                   )}
 
@@ -234,11 +265,11 @@ export default function Cart() {
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
                     onClick={handleCheckout}
-                    disabled={isCheckingOut}
+                    disabled={isCheckingOut || isPayingLater}
                     className={`w-full py-3 sm:py-4 rounded-lg sm:rounded-xl font-bold transition-all flex items-center justify-center gap-2 text-sm sm:text-base ${
                       isCheckingOut
                         ? 'bg-green-600 text-white'
-                        : 'bg-gradient-to-r from-orange-600 to-orange-700 text-white hover:from-orange-700 hover:to-orange-800'
+                        : 'bg-gradient-to-r from-orange-600 to-orange-700 text-white hover:from-orange-700 hover:to-orange-800 disabled:opacity-50'
                     }`}
                   >
                     {isCheckingOut ? (
@@ -253,6 +284,30 @@ export default function Cart() {
                       </>
                     )}
                   </motion.button>
+
+                  {/* Pay Later Button */}
+                  <motion.button
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={handlePayLater}
+                    disabled={isCheckingOut || isPayingLater}
+                    className="w-full mt-3 py-3 sm:py-4 rounded-lg sm:rounded-xl font-bold transition-all flex items-center justify-center gap-2 text-sm sm:text-base border-2 border-stone-300 text-stone-700 hover:border-orange-400 hover:text-orange-600 disabled:opacity-50"
+                  >
+                    {isPayingLater ? (
+                      <>
+                        <CheckCircle size={18} />
+                        Placing Order...
+                      </>
+                    ) : (
+                      <>
+                        <Clock size={18} />
+                        Pay Later
+                      </>
+                    )}
+                  </motion.button>
+                  <p className="mt-2 text-xs text-stone-400 text-center">
+                    Order placed as pending — pay at collection
+                  </p>
 
                   {/* Info */}
                   <div className="mt-6 space-y-3">

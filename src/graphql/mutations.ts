@@ -153,6 +153,15 @@ export const CHECKOUT_CART = gql`
 `;
 
 /**
+ * Mutation: Checkout cart with pay-later (PENDING status, no Razorpay)
+ */
+export const PAY_LATER_CART = gql`
+  mutation PayLaterCart($items: [CartOrderItemInput!]!) {
+    payLaterCart(items: $items)
+  }
+`;
+
+/**
  * Mutation: Verify cart payment and mark all purchases completed
  */
 export const VERIFY_CART_PAYMENT = gql`
